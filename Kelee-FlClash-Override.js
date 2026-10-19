@@ -1,48 +1,123 @@
 /*
- * Kelee -> FlClash Override
- * Source template: Clash_Sample_Config_By_iKeLee.yaml
+ * Kelee-FlClash-Override
  *
- * 用途：
- * 将 iKeLee Mihomo 配置的 DNS、策略组、Rule Providers、
- * Rules 等逻辑应用到 FlClash 已有机场订阅。
+ * Based on iKeLee / ProxyResource:
+ * https://github.com/luestr/ProxyResource
  *
- * 注意：
- * 1. 不包含任何机场订阅 URL。
- * 2. 节点直接读取 FlClash 当前机场订阅的 config.proxies。
- * 3. 不要与 Proxy-override 同时启用。
+ * Original Mihomo configuration:
+ * Tool/Clash/Config/Clash_Sample_Config_By_iKeLee.yaml
+ *
+ * Thanks to iKeLee (Kelee) for maintaining and sharing
+ * the original configuration and rule resources.
+ *
+ * This is an unofficial FlClash Override adaptation.
+ * It is not affiliated with or maintained by iKeLee.
  */
 
 function main(config) {
-  config = config || {};
+  // ============================================================
+  // 1. 获取 FlClash 当前订阅中的节点
+  // ============================================================
 
-  const proxies = Array.isArray(config.proxies)
-    ? config.proxies
-    : [];
+  const proxies = Array.isArray(config.proxies) ? config.proxies : [];
 
-  const nodeNames = proxies
-    .map(p => p && p.name)
-    .filter(
-      name =>
-        typeof name === "string" &&
-        name.length > 0
-    );
-
-  if (nodeNames.length === 0) {
+  if (proxies.length === 0) {
     throw new Error(
-      "Kelee Override: 当前订阅没有可用 proxies 节点，请确认机场订阅已经正常加载。"
+      "Kelee-FlClash-Override：当前配置中没有找到任何代理节点，请先确认机场订阅已经正常加载。"
+    );
+  }
+
+  const proxyNames = proxies
+    .map((proxy) => proxy && proxy.name)
+    .filter((name) => typeof name === "string" && name.trim().length > 0);
+
+
+  // ============================================================
+  // 2. 节点过滤
+  // ============================================================
+
+  // 排除游戏、回国、校园等特殊节点
+  const EXCLUDE_REGION =
+    /(回国|校园|游戏|🎮|\bGAME\b)/i;
+
+  // 排除机场公告、流量提示、到期提醒等非正常代理节点
+  const EXCLUDE_ALL =
+    /(官网|网站|网址|剩余|流量|套餐|到期|过期|时间|重置|更新|公告|通知|提示|客服|群组|频道|订阅|续费|倍率|Traffic|Expire|Website|Official|剩余流量|距离下次重置)/i;
+
+  const allNodes = proxyNames.filter(
+    (name) =>
+      !EXCLUDE_ALL.test(name) &&
+      !EXCLUDE_REGION.test(name)
+  );
+
+
+  if (allNodes.length === 0) {
+    throw new Error(
+      "Kelee-FlClash-Override：过滤后没有可用代理节点，请检查机场节点名称。"
     );
   }
 
 
-  /* =========================
-   * 基础 Mihomo 设置
-   * ========================= */
+  // ============================================================
+  // 3. 国家 / 地区节点识别
+  // ============================================================
+
+  const REGION_REGEX = {
+    hk: /(香港|港|HK|Hong\s*Kong|HongKong|🇭🇰)/i,
+
+    tw: /(台湾|臺灣|台灣|台北|TW|Taiwan|Taipei|🇹🇼)/i,
+
+    jp: /(日本|东京|東京|大阪|JP|Japan|Tokyo|Osaka|🇯🇵)/i,
+
+    kr: /(韩国|韓國|首尔|首爾|KR|Korea|Seoul|🇰🇷)/i,
+
+    sg: /(新加坡|狮城|獅城|新国|SG|Singapore|🇸🇬)/i,
+
+    us: /(美国|美國|洛杉矶|洛杉磯|西雅图|西雅圖|圣何塞|聖何塞|纽约|紐約|达拉斯|達拉斯|US|USA|United\s*States|America|Los\s*Angeles|Seattle|San\s*Jose|New\s*York|Dallas|🇺🇸)/i,
+
+    uk: /(英国|英國|伦敦|倫敦|UK|United\s*Kingdom|Britain|London|🇬🇧)/i,
+
+    fr: /(法国|法國|巴黎|FR|France|Paris|🇫🇷)/i,
+
+    de: /(德国|德國|法兰克福|法蘭克福|DE|Germany|Frankfurt|🇩🇪)/i,
+  };
+
+
+  function region(regex) {
+    return allNodes.filter((name) => regex.test(name));
+  }
+
+
+  const hkNodes = region(REGION_REGEX.hk);
+  const twNodes = region(REGION_REGEX.tw);
+  const jpNodes = region(REGION_REGEX.jp);
+  const krNodes = region(REGION_REGEX.kr);
+  const sgNodes = region(REGION_REGEX.sg);
+  const usNodes = region(REGION_REGEX.us);
+  const ukNodes = region(REGION_REGEX.uk);
+  const frNodes = region(REGION_REGEX.fr);
+  const deNodes = region(REGION_REGEX.de);
+
+
+  // 自动策略不能出现空节点组。
+  // 如果机场没有该地区节点，则回退到全部可用节点。
+  function usable(nodes) {
+    return nodes.length > 0 ? nodes : allNodes;
+  }
+
+
+  // ============================================================
+  // 4. Mihomo 基础设置
+  // ============================================================
 
   config["unified-delay"] = true;
+
   config["geodata-mode"] = false;
+
   config["geodata-loader"] = "standard";
 
   config["geo-auto-update"] = true;
+
   config["geo-update-interval"] = 24;
 
   config["tcp-concurrent"] = true;
@@ -53,44 +128,41 @@ function main(config) {
 
   config["allow-lan"] = true;
 
-  config["mode"] = "rule";
+  config.mode = "rule";
 
   config["log-level"] = "info";
 
-  config["ipv6"] = true;
+  config.ipv6 = true;
 
-  config["udp"] = true;
+  config.udp = true;
 
 
-  /* =========================
-   * Geo 数据
-   * ========================= */
+  // ============================================================
+  // 5. GeoData
+  // ============================================================
 
   config["geox-url"] = {
     mmdb:
       "https://geodata.kelee.one/Country-Masaiki.mmdb",
 
     asn:
-      "https://geodata.kelee.one/GeoLite2-ASN-P3TERX.mmdb"
+      "https://geodata.kelee.one/GeoLite2-ASN-P3TERX.mmdb",
   };
 
 
-  /* =========================
-   * Profile
-   * ========================= */
+  // ============================================================
+  // 6. Profile
+  // ============================================================
 
   config.profile = {
-    ...(config.profile || {}),
-
     "store-selected": true,
-
-    "store-fake-ip": true
+    "store-fake-ip": true,
   };
 
 
-  /* =========================
-   * Sniffer
-   * ========================= */
+  // ============================================================
+  // 7. Sniffer
+  // ============================================================
 
   config.sniffer = {
     enable: true,
@@ -104,534 +176,549 @@ function main(config) {
     sniff: {
       HTTP: {
         ports: [
-          "80",
-          "8080-8880"
+          80,
+          "8080-8880",
         ],
 
-        "override-destination": true
+        "override-destination": true,
       },
 
       TLS: {
         ports: [
-          "443",
-          "8443"
-        ]
+          443,
+          8443,
+        ],
       },
 
       QUIC: {
         ports: [
-          "443",
-          "8443"
-        ]
-      }
+          443,
+          8443,
+        ],
+      },
     },
-
-    "force-domain": [
-      "+.v2ex.com"
-    ],
-
-    "skip-domain": [
-      "Mijia Cloud"
-    ]
   };
 
 
-  /* =========================
-   * TUN
-   * ========================= */
+  // ============================================================
+  // 8. TUN
+  // ============================================================
 
   config.tun = {
-    ...(config.tun || {}),
-
     enable: true,
 
     stack: "system",
 
     "dns-hijack": [
-      "any:53"
+      "any:53",
     ],
 
     "auto-route": true,
 
-    "auto-detect-interface": true
+    "auto-detect-interface": true,
   };
 
 
-  /* =========================
-   * DNS
-   * ========================= */
+  // ============================================================
+  // 9. DNS
+  // ============================================================
 
   config.dns = {
     enable: true,
 
     "prefer-h3": true,
 
-    listen:
-      "0.0.0.0:1053",
+    listen: "0.0.0.0:1053",
 
     ipv6: false,
 
-    "enhanced-mode":
-      "fake-ip",
+    "enhanced-mode": "fake-ip",
 
-    "fake-ip-range":
-      "28.0.0.1/8",
+    "fake-ip-range": "28.0.0.1/8",
 
     "fake-ip-filter": [
       "*",
-      "+.lan"
+      "+.lan",
     ],
 
     "default-nameserver": [
       "223.5.5.5",
-      "223.6.6.6"
+      "223.6.6.6",
     ],
 
     nameserver: [
       "https://223.5.5.5/dns-query",
-      "https://223.6.6.6/dns-query"
-    ]
+      "https://223.6.6.6/dns-query",
+    ],
   };
 
 
-  /* =========================
-   * 节点过滤
-   * ========================= */
+  // ============================================================
+  // 10. Proxy Group 创建工具
+  // ============================================================
 
-  const EXCLUDE_REGION =
-    /(回国|校园|游戏|🎮|\bGAME\b)/i;
-
-
-  const EXCLUDE_ALL =
-    /(群|邀请|返利|循环|官网|客服|网站|网址|获取|订阅|流量|到期|机场|下次|版本|官址|备用|过期|已用|联系|邮箱|工单|贩卖|通知|倒卖|防止|国内|地址|频道|无法|说明|使用|提示|特别|访问|支持|教程|关注|更新|作者|加入|超时|收藏|福利|好友|失联|\b(USE|USED|TOTAL|EXPIRE|EMAIL|Panel|Channel|Author|Traffic)\d*\b|\d{4}-\d{2}-\d{2}|\dG)/i;
+  const TEST_URL =
+    "https://www.google.com/generate_204";
 
 
-  /* =========================
-   * 国家/地区节点识别
-   * ========================= */
+  // 自动测速策略
+  function autoGroup(name, nodes) {
+    return {
+      name: name,
 
-  const regionPatterns = {
+      type: "url-test",
 
-    hk:
-      /(🇭🇰|香港|\b(HK|HKG|Hong)\d*\b)/i,
+      proxies: usable(nodes),
 
-    tw:
-      /(🇹🇼|台湾|\b(TW|TWN|Tai|Taiwan)\d*\b)/i,
+      url: TEST_URL,
 
-    jp:
-      /(🇯🇵|日本|川日|东京|大阪|泉日|埼玉|\b(JP|JPN|Japan)\d*\b)/i,
+      interval: 6,
 
-    kr:
-      /(🇰🇷|韩国|韓|首尔|\b(KR|KOR|Korea)\d*\b)/i,
+      tolerance: 20,
 
-    sg:
-      /(🇸🇬|新加坡|狮|\b(SG|SGP|Singapore)\d*\b)/i,
+      lazy: true,
 
-    us:
-      /(🇺🇸|美国|波特兰|达拉斯|俄勒冈|凤凰城|费利蒙|硅谷|拉斯维加斯|洛杉矶|圣何塞|圣克拉拉|西雅图|芝加哥|\b(US|USA|United States)\d*\b)/i,
+      timeout: 2000,
 
-    uk:
-      /(🇬🇧|英国|伦敦|\b(UK|GBR|United Kingdom)\d*\b)/i,
+      "max-failed-times": 3,
 
-    fr:
-      /(🇫🇷|法国|\b(FR|FRA|France)\d*\b)/i,
-
-    de:
-      /(🇩🇪|德国|\b(DE|DEU|Germany)\d*\b)/i
-  };
+      hidden: true,
+    };
+  }
 
 
-  /* =========================
-   * 去除机场公告类节点
-   * ========================= */
+  // 手动节点选择策略
+  function manualGroup(name, nodes) {
+    return {
+      name: name,
 
-  const allNodes =
-    nodeNames.filter(
-      n => !EXCLUDE_ALL.test(n)
-    );
+      type: "select",
 
-
-  const region = key =>
-    nodeNames.filter(
-      n =>
-        regionPatterns[key].test(n) &&
-        !EXCLUDE_REGION.test(n)
-    );
+      // 如果机场确实没有这个地区节点，
+      // 使用全部节点作为兼容回退，避免空策略组。
+      proxies: usable(nodes),
+    };
+  }
 
 
-  const hk = region("hk");
-  const tw = region("tw");
-  const jp = region("jp");
-  const kr = region("kr");
-  const sg = region("sg");
-  const us = region("us");
-  const uk = region("uk");
-  const fr = region("fr");
-  const de = region("de");
+  // ============================================================
+  // 11. 国家 / 地区自动策略
+  // ============================================================
 
+  const autoGroups = [
 
-  /*
-   * 如果机场没有某个地区节点，
-   * 防止生成空的 url-test 策略组。
-   */
+    autoGroup(
+      "香港自动策略",
+      hkNodes
+    ),
 
-  const usable = arr =>
-    arr.length
-      ? arr
-      : allNodes;
+    autoGroup(
+      "台湾自动策略",
+      twNodes
+    ),
 
+    autoGroup(
+      "日本自动策略",
+      jpNodes
+    ),
 
-  /* =========================
-   * URL-Test 模板
-   * ========================= */
+    autoGroup(
+      "韩国自动策略",
+      krNodes
+    ),
 
-  const urlTest =
-    (name, nodes) => ({
+    autoGroup(
+      "新国自动策略",
+      sgNodes
+    ),
 
-      name,
+    autoGroup(
+      "美国自动策略",
+      usNodes
+    ),
 
-      type:
-        "url-test",
+    autoGroup(
+      "英国自动策略",
+      ukNodes
+    ),
 
-      proxies:
-        usable(nodes),
+    autoGroup(
+      "法国自动策略",
+      frNodes
+    ),
 
-      interval:
-        6,
-
-      tolerance:
-        20,
-
-      lazy:
-        true,
-
-      url:
-        "http://www.google.com/blank.html",
-
-      "disable-udp":
-        false,
-
-      timeout:
-        2000,
-
-      "max-failed-times":
-        3,
-
-      hidden:
-        true
-    });
-
-
-  const fallbackNames = [
-
-    "香港自动策略",
-
-    "台湾自动策略",
-
-    "日本自动策略",
-
-    "韩国自动策略",
-
-    "新国自动策略",
-
-    "美国自动策略",
-
-    "英国自动策略",
-
-    "法国自动策略",
-
-    "德国自动策略"
+    autoGroup(
+      "德国自动策略",
+      deNodes
+    ),
   ];
 
 
-  /* =========================
-   * Kelee 策略组
-   * ========================= */
+  // ============================================================
+  // 12. 国家 / 地区手动策略
+  //
+  // 这里就是本版本新增的部分。
+  //
+  // 例如：
+  //
+  // 香港手动策略
+  //   ├── 香港01
+  //   ├── 香港02
+  //   └── 香港03
+  //
+  // ============================================================
+
+  const manualGroups = [
+
+    manualGroup(
+      "香港手动策略",
+      hkNodes
+    ),
+
+    manualGroup(
+      "台湾手动策略",
+      twNodes
+    ),
+
+    manualGroup(
+      "日本手动策略",
+      jpNodes
+    ),
+
+    manualGroup(
+      "韩国手动策略",
+      krNodes
+    ),
+
+    manualGroup(
+      "新国手动策略",
+      sgNodes
+    ),
+
+    manualGroup(
+      "美国手动策略",
+      usNodes
+    ),
+
+    manualGroup(
+      "英国手动策略",
+      ukNodes
+    ),
+
+    manualGroup(
+      "法国手动策略",
+      frNodes
+    ),
+
+    manualGroup(
+      "德国手动策略",
+      deNodes
+    ),
+  ];
+
+
+  // ============================================================
+  // 13. 兜底策略
+  //
+  // 顺序严格按照：
+  //
+  // 香港自动
+  // 台湾自动
+  // 日本自动
+  // ...
+  // 香港手动
+  // 台湾手动
+  // 日本手动
+  // ...
+  //
+  // ============================================================
+
+  const fallbackSelector = {
+    name: "兜底后备策略",
+
+    type: "select",
+
+    proxies: [
+
+      // ====================
+      // 自动策略
+      // ====================
+
+      "香港自动策略",
+
+      "台湾自动策略",
+
+      "日本自动策略",
+
+      "韩国自动策略",
+
+      "新国自动策略",
+
+      "美国自动策略",
+
+      "英国自动策略",
+
+      "法国自动策略",
+
+      "德国自动策略",
+
+
+      // ====================
+      // 手动策略
+      // ====================
+
+      "香港手动策略",
+
+      "台湾手动策略",
+
+      "日本手动策略",
+
+      "韩国手动策略",
+
+      "新国手动策略",
+
+      "美国手动策略",
+
+      "英国手动策略",
+
+      "法国手动策略",
+
+      "德国手动策略",
+    ],
+  };
+
+
+  // ============================================================
+  // 14. 特殊业务策略
+  // ============================================================
+
+  const specialGroups = [
+
+    {
+      name: "游戏选择",
+
+      type: "select",
+
+      proxies: [
+        "PASS",
+        "DIRECT",
+        ...allNodes,
+      ],
+    },
+
+
+    {
+      name: "AI",
+
+      type: "select",
+
+      proxies: [
+        ...allNodes,
+      ],
+    },
+
+
+    {
+      name: "TikTok",
+
+      type: "select",
+
+      proxies: [
+        ...allNodes,
+      ],
+    },
+
+
+    {
+      name: "Speedtest国际",
+
+      type: "select",
+
+      proxies: [
+        "PASS",
+        "DIRECT",
+        ...allNodes,
+      ],
+    },
+
+
+    {
+      name: "Netflix",
+
+      type: "select",
+
+      proxies: [
+        ...allNodes,
+      ],
+    },
+  ];
+
+
+  // ============================================================
+  // 15. 写入 Proxy Groups
+  //
+  // 注意顺序：
+  //
+  // 特殊业务策略
+  // ↓
+  // 兜底策略
+  // ↓
+  // 国家自动策略
+  // ↓
+  // 国家手动策略
+  //
+  // ============================================================
 
   config["proxy-groups"] = [
 
-    {
-      name:
-        "游戏选择",
+    ...specialGroups,
 
-      type:
-        "select",
+    fallbackSelector,
 
-      proxies: [
-        "PASS",
-        "DIRECT",
-        ...allNodes
-      ]
-    },
+    ...autoGroups,
 
-
-    {
-      name:
-        "AI",
-
-      type:
-        "select",
-
-      proxies:
-        allNodes
-    },
-
-
-    {
-      name:
-        "TikTok",
-
-      type:
-        "select",
-
-      proxies:
-        allNodes
-    },
-
-
-    {
-      name:
-        "Speedtest国际",
-
-      type:
-        "select",
-
-      proxies: [
-        "PASS",
-        "DIRECT",
-        ...allNodes
-      ]
-    },
-
-
-    {
-      name:
-        "Netflix",
-
-      type:
-        "select",
-
-      proxies:
-        allNodes
-    },
-
-
-    {
-      name:
-        "兜底后备策略",
-
-      type:
-        "fallback",
-
-      proxies:
-        fallbackNames,
-
-      interval:
-        6,
-
-      lazy:
-        true,
-
-      url:
-        "http://www.google.com/blank.html",
-
-      "disable-udp":
-        false,
-
-      timeout:
-        2000,
-
-      "max-failed-times":
-        3
-    },
-
-
-    urlTest(
-      "香港自动策略",
-      hk
-    ),
-
-    urlTest(
-      "台湾自动策略",
-      tw
-    ),
-
-    urlTest(
-      "日本自动策略",
-      jp
-    ),
-
-    urlTest(
-      "韩国自动策略",
-      kr
-    ),
-
-    urlTest(
-      "新国自动策略",
-      sg
-    ),
-
-    urlTest(
-      "美国自动策略",
-      us
-    ),
-
-    urlTest(
-      "英国自动策略",
-      uk
-    ),
-
-    urlTest(
-      "法国自动策略",
-      fr
-    ),
-
-    urlTest(
-      "德国自动策略",
-      de
-    )
+    ...manualGroups,
   ];
 
 
-  /* =========================
-   * Rule Provider 模板
-   * ========================= */
+  // ============================================================
+  // 16. Rule Provider 创建工具
+  // ============================================================
 
-  const rp =
-    (path, url) => ({
+  function ruleProvider(path, url) {
+    return {
+      type: "http",
 
-      type:
-        "http",
+      behavior: "classical",
 
-      behavior:
-        "classical",
+      path: path,
 
-      interval:
-        3600,
+      url: url,
 
-      format:
-        "yaml",
+      interval: 3600,
 
-      proxy:
-        "DIRECT",
+      format: "yaml",
 
-      path,
-
-      url
-    });
+      proxy: "DIRECT",
+    };
+  }
 
 
-  /* =========================
-   * Kelee Rule Providers
-   * ========================= */
+  // ============================================================
+  // 17. Rule Providers
+  // ============================================================
 
   config["rule-providers"] = {
 
-    LAN:
-      rp(
-        "./rules/Lan.yaml",
-        "https://kelee.one/Tool/Clash/Rule/LAN_SPLITTER.yaml"
-      ),
+    LAN: ruleProvider(
+      "./ruleset/LAN.yaml",
+      "https://kelee.one/Tool/Clash/Rule/LAN_SPLITTER.yaml"
+    ),
 
 
-    Direct:
-      rp(
-        "./rules/Direct.yaml",
-        "https://kelee.one/Tool/Clash/Rule/Direct.yaml"
-      ),
+    Direct: ruleProvider(
+      "./ruleset/Direct.yaml",
+      "https://kelee.one/Tool/Clash/Rule/Direct.yaml"
+    ),
 
 
-    Proxy:
-      rp(
-        "./rules/Proxy.yaml",
-        "https://kelee.one/Tool/Clash/Rule/Proxy.yaml"
-      ),
+    Proxy: ruleProvider(
+      "./ruleset/Proxy.yaml",
+      "https://kelee.one/Tool/Clash/Rule/Proxy.yaml"
+    ),
 
 
-    AI:
-      rp(
-        "./rules/AI.yaml",
-        "https://kelee.one/Tool/Clash/Rule/AI.yaml"
-      ),
+    AI: ruleProvider(
+      "./ruleset/AI.yaml",
+      "https://kelee.one/Tool/Clash/Rule/AI.yaml"
+    ),
 
 
-    TikTok:
-      rp(
-        "./rules/TikTok.yaml",
-        "https://kelee.one/Tool/Clash/Rule/TikTok.yaml"
-      ),
+    TikTok: ruleProvider(
+      "./ruleset/TikTok.yaml",
+      "https://kelee.one/Tool/Clash/Rule/TikTok.yaml"
+    ),
 
 
-    SpeedtestIntl:
-      rp(
-        "./rules/SpeedtestInternational.yaml",
-        "https://kelee.one/Tool/Clash/Rule/SpeedtestInternational.yaml"
-      ),
+    SpeedtestIntl: ruleProvider(
+      "./ruleset/SpeedtestInternational.yaml",
+      "https://kelee.one/Tool/Clash/Rule/SpeedtestInternational.yaml"
+    ),
 
 
-    Game:
-      rp(
-        "./rules/Game.yaml",
-        "https://kelee.one/Tool/Clash/Rule/Game.yaml"
-      ),
+    Game: ruleProvider(
+      "./ruleset/Game.yaml",
+      "https://kelee.one/Tool/Clash/Rule/Game.yaml"
+    ),
 
 
-    Netflix:
-      rp(
-        "./rules/Netflix.yaml",
-        "https://rule.kelee.one/Clash/Netflix.yaml"
-      ),
+    Netflix: ruleProvider(
+      "./ruleset/Netflix.yaml",
+      "https://rule.kelee.one/Clash/Netflix.yaml"
+    ),
 
 
-    ESET_China:
-      rp(
-        "./rules/ESET_China.yaml",
-        "https://kelee.one/Tool/Clash/Rule/ESET_China.yaml"
-      )
+    ESET_China: ruleProvider(
+      "./ruleset/ESET_China.yaml",
+      "https://kelee.one/Tool/Clash/Rule/ESET_China.yaml"
+    ),
   };
 
 
-  /* =========================
-   * Kelee Rules
-   * ========================= */
+  // ============================================================
+  // 18. Rules
+  // ============================================================
 
   config.rules = [
 
+    // 局域网
     "RULE-SET,LAN,DIRECT",
 
+
+    // 国内 / 直连
     "RULE-SET,Direct,DIRECT",
 
+
+    // 普通代理流量
     "RULE-SET,Proxy,兜底后备策略",
 
+
+    // AI
     "RULE-SET,AI,AI",
 
+
+    // TikTok
     "RULE-SET,TikTok,TikTok",
 
+
+    // 国际测速
     "RULE-SET,SpeedtestIntl,Speedtest国际",
 
+
+    // 游戏
     "RULE-SET,Game,游戏选择",
 
+
+    // Netflix
     "RULE-SET,Netflix,Netflix",
 
+
+    // ESET 中国
     "RULE-SET,ESET_China,DIRECT",
 
+
+    // 中国 IP
     "GEOIP,CN,DIRECT",
 
-    "MATCH,兜底后备策略"
+
+    // 所有未匹配流量
+    "MATCH,兜底后备策略",
   ];
 
 
-  /*
-   * 不复制 Kelee 示例配置中的 proxy-providers。
-   *
-   * 节点继续由：
-   *
-   * FlClash
-   *      ↓
-   * 你的机场订阅
-   *
-   * 提供。
-   */
+  // ============================================================
+  // 19. 返回最终配置
+  // ============================================================
 
   return config;
 }
